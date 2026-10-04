@@ -10,7 +10,7 @@
 //   - ~/.local/share/nagger/rate-limits.json  (written by ~/.claude/statusline.sh
 //     after every CC response — external producer, do not move)
 //   - ~/.config/guild/nagger.json            (quota reset anchor, spend budget, reminders)
-//   - ~/.config/deepseek/key                  (DeepSeek API key, for the balance)
+//   - ~/.config/deepseek/key_void             (DeepSeek API key, for the balance)
 //   - ~/.local/share/nagger/state.json        (per-nag last-fired dates + the spend
 //     ledger, owned here; migrated from the flat id→date map and, before that,
 //     the legacy last-sent + reminders-state.json files)
@@ -333,7 +333,7 @@ type spendLedger struct {
 
 func deepseekBalance() (float64, error) {
 	home, _ := os.UserHomeDir()
-	key, err := os.ReadFile(filepath.Join(home, ".config", "deepseek", "key"))
+	key, err := os.ReadFile(filepath.Join(home, ".config", "deepseek", "key_void"))
 	if err != nil {
 		return 0, fmt.Errorf("read API key: %w", err)
 	}
