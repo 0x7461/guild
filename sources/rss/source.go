@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mmcdole/gofeed"
 	"github.com/0x7461/guild/bot"
+	"github.com/mmcdole/gofeed"
 )
 
 // FeedConfig describes a single RSS/Atom feed to follow.

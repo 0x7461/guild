@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/PuerkitoBio/goquery"
 	"github.com/0x7461/guild/bot"
 	"github.com/0x7461/guild/compress"
+	"github.com/PuerkitoBio/goquery"
 )
 
 // TrendingSource fetches trending repositories from GitHub.
