@@ -1,6 +1,6 @@
 # AGENTS.md — guild
 
-Updated: 2026-09-29
+Updated: 2026-10-09
 
 Lightweight Go framework for scheduled Telegram bots. Three interfaces (Source / Formatter / Sender) wired into one runner; each bot is its own binary on a runit + snooze schedule. Binaries: paperboy (RSS digest), scout (combined GitHub trending + HN Ask/Show/Tell — `bot.MultiSource`), and nagger (daily Claude-quota pace nudge + monthly DeepSeek spend budget + recurring manual-task reminders — uses `senders/telegram` directly rather than the Source/Formatter runner).
 
@@ -50,8 +50,8 @@ go run ./cmd/paperboy/
 ```
 bot/                              framework: Item, Source/Formatter/Sender, Bot runner, MultiSource
 bot/curate/                       LLM passes: ranking (ChainCurator, paperboy), Summarize (paperboy) +
-                                  Annotate (scout). Backends: Ollama (default) or claude -p, routed
-                                  explicitly per pass via runText/backendFor.
+                                  Annotate (scout). Backends: Ollama or claude -p, chosen per pass by
+                                  config and routed explicitly via runText/backendFor.
 cmd/{paperboy,scout,nagger}/       bot entry points — one binary each
 sources/{rss,github,hackernews}/  Source implementations (gofeed, goquery, Algolia HN API)
 formatters/{rss,scout}/           Formatter implementations
@@ -64,8 +64,8 @@ bin/                              built binaries (gitignored)
 External integration points:
 - `~/service/{scout,paperboy,nagger}/` — runit user services.
 - `~/.local/share/guild/rss-seen.db` — RSS SQLite: `seen` (judged guids, 90d retention) + `pending` (curated-but-undelivered items, **stored whole** — a guid is useless later because the feed window has moved on; 14d retention bounds it if delivery stops firing).
-- `~/.config/guild/<bot>.json` — per-bot config overrides (scout: period/summarize/limit + hn block; paperboy: feed list, max_delivery, `curate` block, `summarize` block — per-item one-line summaries, sonnet, off unless `enabled`). **`paperboy.json` is chezmoi-managed** — `chezmoi re-add ~/.config/guild/paperboy.json` after editing it live, or the source drifts (scout/nagger json are not tracked).
-- `~/.config/guild/nagger.json` — nagger schedule config + `reminders` array, read by `cmd/nagger`. Hand-edited (was written by ai-agent's `/nagger` before that bot's retirement). Each reminder: `{id, message, every_days, anchor}` (anchor = first due date when never fired). **`quota_enabled`** gates the daily Claude-quota nag; it defaults to `true` via `cmd/nagger`'s config literal, so an absent key keeps the nag. Set to `false` 2026-09-17 — Claude Pro is cancelled, paid through 2026-10-10, so there is no quota to pace. **`spend_quota_usd`** (monthly DeepSeek budget; 0/absent disables the spend nag; `~/.pi/agent/extensions/status.ts` reads the same key) and **`warn_fractions`** (default `[0.5, 0.8, 0.9]`; live config adds `1.0`). The balance comes from DeepSeek's `/user/balance` with the key at `~/.config/deepseek/key`; an unreadable balance fires a `spend-error` nag at most daily.
+- `~/.config/guild/<bot>.json` — per-bot config overrides (scout: period/summarize/limit + hn block; paperboy: feed list, max_delivery, `curate` block, `summarize` block — per-item one-line summaries (backend/model from the live config — currently `gemma4:e4b` on ollama), off unless `enabled`). **`paperboy.json` is chezmoi-managed** — `chezmoi re-add ~/.config/guild/paperboy.json` after editing it live, or the source drifts (scout/nagger json are not tracked).
+- `~/.config/guild/nagger.json` — nagger schedule config + `reminders` array, read by `cmd/nagger`. Hand-edited (was written by ai-agent's `/nagger` before that bot's retirement). Each reminder: `{id, message, every_days, anchor}` (anchor = first due date when never fired). **`quota_enabled`** gates the daily Claude-quota nag; it defaults to `true` via `cmd/nagger`'s config literal, so an absent key keeps the nag. Set to `false` 2026-09-17 — Claude Pro is cancelled, paid through 2026-10-10, so there is no quota to pace. **`spend_quota_usd`** (monthly DeepSeek budget; 0/absent disables the spend nag; `~/.pi/agent/extensions/status.ts` reads the same key) and **`warn_fractions`** (default `[0.5, 0.8, 0.9]`; live config adds `1.0`). The balance comes from DeepSeek's `/user/balance` with the key at `~/.config/deepseek/key_void`; an unreadable balance fires a `spend-error` nag at most daily.
 - `~/.local/share/nagger/{rate-limits.json,state.json}` — `rate-limits.json` is the pace cache (written by `~/.claude/statusline.py` every CC response — external, don't move; `statusline.sh` became a thin per-OS runner 2026-09-18 and no longer writes it). The writer skips the write where `~/.local/share` is absent, and skips it when no `rate_limits` field is present, so the last good reading survives a payload without limits. `state.json` holds `lastFired` (id→YYYY-MM-DD, incl. `quota`) and `spend`, the month ledger (`start_balance`, `topups`, `last_balance`, `fired` thresholds; config is immutable, state is separate). A rise in balance is booked as a top-up, never as negative spend, and the ledger restarts on the first run of a month. The flat id→date format (until 2026-09-29) is read as `lastFired`; the older split `last-sent` + `reminders-state.json` still migrates once if `state.json` is absent. **Spend is account-wide:** if the DeepSeek key is used on another machine, its spend counts here too.
 
 ## Boundaries & gotchas
