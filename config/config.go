@@ -91,7 +91,7 @@ type NaggerConfig struct {
 // Reminder is a recurring manual-task nudge fired by nagger on a fixed-day
 // cadence. Fires when today >= (last-fired + EveryDays), or >= Anchor when
 // never fired — so a missed run still fires late rather than skipping a cycle.
-// Last-fired state lives in ~/.local/share/nagger/reminders-state.json, keyed
+// Last-fired state lives in ~/.local/share/nagger/state.json (lastFired), keyed
 // by ID; the config here is immutable and hand-editable.
 type Reminder struct {
 	ID        string `json:"id"`

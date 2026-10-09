@@ -22,9 +22,9 @@ Adding a new bot = implement `Source`, pick a `Formatter` and `Sender`, pass to 
 
 ## Bots
 
-- **paperboy** — RSS feed aggregator. HN Best, Lobsters, Techmeme, blogs. SQLite dedup. Runs twice daily.
+- **paperboy** — RSS feed aggregator. HN Best, Lobsters, Techmeme, blogs. SQLite dedup. Curates daily, delivers Mon + Fri.
 - **scout** — combined weekly "what's new online" digest: GitHub trending + HN Ask/Show/Tell, ranked by points+comments, each with a one-line summary and a comment-thread sentiment read. Built on `MultiSource`. Runs weekly.
-- **nagger** — daily Claude-quota pace nudge. One-shot, hourly 08–22, dedup'd to one message/day.
+- **nagger** — monthly DeepSeek spend budget + recurring manual-task reminders. Hourly 08–22, dedup'd per nag.
 
 ## Project Structure
 
@@ -45,4 +45,4 @@ Copy `.env.example` to `.env` and fill in bot tokens and chat IDs. Each bot can 
 - [goquery](https://github.com/PuerkitoBio/goquery) — HTML parsing (GitHub trending)
 - [gofeed](https://github.com/mmcdole/gofeed) — RSS/Atom feed parsing
 - [godotenv](https://github.com/joho/godotenv) — .env loading
-- [go-sqlite3](https://github.com/mattn/go-sqlite3) — SQLite (RSS dedup)
+- [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) — SQLite (RSS dedup)
