@@ -2,7 +2,7 @@
 
 Updated: 2026-10-09
 
-Lightweight Go framework for scheduled Telegram bots. Three interfaces (Source / Formatter / Sender) wired into one runner; each bot is its own binary on a runit + snooze schedule. Binaries: paperboy (RSS digest), scout (combined GitHub trending + HN Ask/Show/Tell — `bot.MultiSource`), and nagger (daily Claude-quota pace nudge + monthly DeepSeek spend budget + recurring manual-task reminders — uses `senders/telegram` directly rather than the Source/Formatter runner).
+Lightweight Go framework for scheduled Telegram bots. Three interfaces (Source / Formatter / Sender) wired into one runner; each bot is its own binary on a runit + snooze schedule. Binaries: paperboy (RSS digest), scout (combined GitHub trending + HN Ask/Show/Tell — `bot.MultiSource`), and nagger (monthly DeepSeek spend budget + recurring manual-task reminders; the daily Claude-quota pace nudge is still in the code but off via `quota_enabled: false` — uses `senders/telegram` directly rather than the Source/Formatter runner).
 
 > The `ai-agent` bot ("The Smartass" — interactive multi-backend Telegram chat) was **retired 2026-06-14** (superseded by Claude's remote-control; barely used). See `HISTORY.md`.
 
@@ -25,7 +25,7 @@ Declared runtime state — reconciled against `sv status` + `down` sentinels by 
 
 - `scout`: persistent, every 7d — weekly Sat 09:00 GitHub trending + HN digest (`snooze -w6 -H9`). Credentials in `.env.scout` (`BOT_SCOUT__TOKEN`/`BOT_SCOUT__CHAT`). Replaced `github-trending`/gh-bot (retired 2026-06-17).
 - `paperboy`: persistent, every 1d — fires daily 18:00, **delivers Mon + Fri only** (`snooze -H18` → `-mode=deliver` on `date +%u` 1|5, else `-mode=curate`). The split is deliberate: a feed only exposes its newest `max_items`, so a twice-weekly *fetch* loses whatever the busy feeds published in between. Curating daily and queueing the winners (`pending` table in `rss-seen.db`) keeps every day's items and holds each curate prompt to ~50 items — the size gemma4 handles well — instead of one 3× longer on delivery day.
-- `nagger`: persistent, every 12h — hourly 08–22 (`snooze -H8-22 ./bin/nagger`). Runs a unified set of periodic **nags** (`cmd/nagger`: `Nag` = id + interval + anchor + renderer): the daily Claude-quota pace check (interval 1, live-computed message), the **DeepSeek spend budget** (evaluated every run, fires once per crossed threshold per month) and recurring manual-task **reminders** (fixed-day cadence, e.g. quarterly archive chores; configured under `reminders` in `nagger.json`). One run evaluates all nags, fires the due ones as **one combined message** (grouped under headers), and dedups per-nag via `state.json`. Per-nag dedup makes the hourly poll idempotent (each nag fires once per cycle).
+- `nagger`: persistent, every 12h — hourly 08–22 (`snooze -H8-22 ./bin/nagger`). Runs a unified set of periodic **nags** (`cmd/nagger`: `Nag` = id + interval + anchor + renderer): the daily Claude-quota pace check (interval 1, live-computed message — currently off via `quota_enabled: false`), the **DeepSeek spend budget** (evaluated every run, fires once per crossed threshold per month) and recurring manual-task **reminders** (fixed-day cadence, e.g. quarterly archive chores; configured under `reminders` in `nagger.json`). One run evaluates all nags, fires the due ones as **one combined message** (grouped under headers), and dedups per-nag via `state.json`. Per-nag dedup makes the hourly poll idempotent (each nag fires once per cycle).
 
 ## Commands
 
@@ -98,4 +98,4 @@ External integration points:
 - **`PLAN.md ## Decisions`** (local-only) — architectural choices: separate binaries, snooze+runit scheduling, three-interface split.
 - **`PLAN.md ## Internals`** — recap integration, dotenv/runit interaction details.
 - **`HISTORY.md`** — what shipped when, including the 2026-06-14 ai-agent retirement and the 2026-03-13 Opus code-review hardening (20 issues fixed in one commit, `b10018a`).
-- **`cmd/nagger/`** — quota-pace nudge, folded in 2026-06-05 (was the standalone `~/projects/nagger` Python project). Reads `~/.config/guild/nagger.json`.
+- **`cmd/nagger/`** — DeepSeek spend budget + recurring reminders (the quota-pace nudge is off), folded in 2026-06-05 (was the standalone `~/projects/nagger` Python project). Reads `~/.config/guild/nagger.json`.
