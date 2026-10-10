@@ -1,6 +1,6 @@
 # AGENTS.md — guild
 
-Updated: 2026-10-09
+Updated: 2026-10-10
 
 Lightweight Go framework for scheduled Telegram bots. Three interfaces (Source / Formatter / Sender) wired into one runner; each bot is its own binary on a runit + snooze schedule. Binaries: paperboy (RSS digest), scout (combined GitHub trending + HN Ask/Show/Tell — `bot.MultiSource`), and nagger (monthly DeepSeek spend budget + recurring manual-task reminders; the daily Claude-quota pace nudge is still in the code but off via `quota_enabled: false` — uses `senders/telegram` directly rather than the Source/Formatter runner).
 
@@ -30,14 +30,15 @@ Declared runtime state — reconciled against `sv status` + `down` sentinels by 
 ## Commands
 
 ```bash
-# Build (run after every code change before sv restart)
+# Build (each bot execs bin/<bot> fresh on its snooze fire — no restart needed)
 go build -o bin/scout    ./cmd/scout/
 go build -o bin/paperboy  ./cmd/paperboy/
+go build -o bin/nagger    ./cmd/nagger/
 
 # Dry-run scout without sending (umbrella .env sets ENABLE_TELEGRAM=true, so override):
 ENABLE_TELEGRAM=false go run ./cmd/scout/
 
-# Service control
+# Service control (restart only a long-lived daemon; scout/paperboy/nagger are snooze-wrapped)
 SVDIR=~/service sv status scout
 SVDIR=~/service sv restart paperboy
 
@@ -75,7 +76,7 @@ External integration points:
 - **Set `ENABLE_TELEGRAM=true` in `.env`** for real sends; otherwise bots dry-run (log instead of POST). Required in prod.
 - **`cd /path/to/project` before `exec` in runit `run` scripts.** runit doesn't set CWD; `godotenv.Load()` won't find `.env` without it.
 - **scout's `run` exports `PATH="/home/ta/.local/share/mise/shims:/home/ta/.local/bin:$PATH"`.** `compress/` shells out to bare `summarize`, an npm CLI (`#!/usr/bin/env node`) — without mise's node shim on PATH it fails with `env: 'node': No such file or directory`. Don't rely on runsvdir's inherited PATH (it comes from whatever session started niri).
-- **Rebuild AND restart after code changes:** `go build -o bin/<bot> ./cmd/<bot>/` AND `SVDIR=~/service sv restart <bot>`. runit runs the pre-built binary from `bin/`, not `go run`. Stale binaries silently serve old behavior — hit production 2026-03-13 (formatter rewritten 2026-03-09, binary still from 2026-03-07).
+- **Rebuild after code changes; restart only a long-lived daemon:** `go build -o bin/<bot> ./cmd/<bot>/`. runit runs the pre-built binary from `bin/`, not `go run`, so a stale binary silently serves old behavior — hit production 2026-03-13 (formatter rewritten 2026-03-09, binary still from 2026-03-07). nagger, paperboy and scout run as `snooze … bin/<bot>`, which execs the binary fresh at each fire, so a rebuild is live at the next run **without** a restart (a restart inside a snooze window can skip that fire).
 - **One binary per bot.** Different schedules, different tokens, different lifecycles. Don't bundle.
 - **Use `BOT_<NAME>__TOKEN` / `BOT_<NAME>__CHAT`** for per-bot Telegram credentials; falls back to generic `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` if unset. Each bot ideally has its own BotFather token. Per-bot secrets live in `.env.<name>`, shared values in the umbrella `.env`; both loaded via `bot.LoadEnv(name)`.
 
