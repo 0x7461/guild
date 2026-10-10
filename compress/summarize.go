@@ -15,7 +15,9 @@ func Summarize(url string) string {
 	// the fetch that called it.
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "summarize", url, "--cli", "claude", "--plain", "--length", "short")
+	// No --cli: let the CLI use its configured provider (model.id / API keys).
+	// `--cli claude` pinned a coding CLI that broke when the Pro plan lapsed.
+	cmd := exec.CommandContext(ctx, "summarize", url, "--plain", "--length", "short")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
