@@ -2,14 +2,20 @@ package compress
 
 import (
 	"bytes"
+	"context"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Summarize runs the summarize CLI on a URL and returns the first paragraph
 // as a compact description. Returns empty string if the CLI is unavailable or fails.
 func Summarize(url string) string {
-	cmd := exec.Command("summarize", url, "--cli", "claude", "--plain", "--length", "short")
+	// A bare exec.Command has no timeout; a stuck summarize process would hang
+	// the fetch that called it.
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "summarize", url, "--cli", "claude", "--plain", "--length", "short")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

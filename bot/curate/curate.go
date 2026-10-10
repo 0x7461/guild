@@ -46,7 +46,8 @@ func (c *ChainCurator) Curate(items []bot.Item, target int) ([]bot.Item, error) 
 	return nil, fmt.Errorf("all curators failed: %s", strings.Join(errs, "; "))
 }
 
-// ClaudeCodeCurator shells out to `claude -p` with --bare.
+// ClaudeCodeCurator shells out to `claude -p` (without --bare — see the note in
+// Curate: --bare would skip auth discovery too).
 type ClaudeCodeCurator struct {
 	Model   string        // "haiku" | "sonnet" | "opus" — or full model ID
 	Timeout time.Duration // hard wall-clock cap

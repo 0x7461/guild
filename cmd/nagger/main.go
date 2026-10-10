@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -171,22 +172,32 @@ type naggerState struct {
 // readState loads state.json. A flat id→date map (the format until 2026-09-29)
 // becomes LastFired. If state.json doesn't exist yet, it migrates once from the
 // pre-unification files (last-sent → "quota"; the reminders-state.json map merged in).
-func readState() *naggerState {
+func readState() (*naggerState, error) {
 	st := &naggerState{}
-	if data, err := os.ReadFile(statePath()); err == nil {
+	data, err := os.ReadFile(statePath())
+	if err == nil {
 		var probe map[string]json.RawMessage
-		if json.Unmarshal(data, &probe) == nil {
-			if _, nested := probe["lastFired"]; nested {
-				_ = json.Unmarshal(data, st)
-			} else {
-				_ = json.Unmarshal(data, &st.LastFired)
+		if err := json.Unmarshal(data, &probe); err != nil {
+			// A truncated state.json used to read back as an empty map, so every
+			// reminder re-fired and the spend ledger was lost. Refuse instead.
+			return nil, fmt.Errorf("state.json is not valid JSON: %w", err)
+		}
+		if _, nested := probe["lastFired"]; nested {
+			if err := json.Unmarshal(data, st); err != nil {
+				return nil, fmt.Errorf("state.json is not valid JSON: %w", err)
 			}
+		} else if err := json.Unmarshal(data, &st.LastFired); err != nil {
+			return nil, fmt.Errorf("state.json is not valid JSON: %w", err)
 		}
 		if st.LastFired == nil {
 			st.LastFired = map[string]string{}
 		}
-		return st
+		return st, nil
 	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("read state.json: %w", err)
+	}
+	// First run: inherit the pre-unification files.
 	st.LastFired = map[string]string{}
 	if b, err := os.ReadFile(filepath.Join(stateDir(), "last-sent")); err == nil {
 		if d := strings.TrimSpace(string(b)); d != "" {
@@ -201,22 +212,38 @@ func readState() *naggerState {
 			}
 		}
 	}
-	return st
+	return st, nil
 }
 
-func writeState(m *naggerState) {
+func writeState(m *naggerState) error {
 	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
-		log.Printf("warning: mkdir state dir: %v", err)
-		return
+		return fmt.Errorf("mkdir state dir: %w", err)
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		log.Printf("warning: marshal state: %v", err)
-		return
+		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(statePath(), append(data, '\n'), 0o644); err != nil {
-		log.Printf("warning: write state: %v", err)
+	// Write to a temp file and rename: a crash mid-write left a truncated
+	// state.json, which read back as empty and re-fired every nag.
+	tmp, err := os.CreateTemp(stateDir(), "state.json.tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp state: %w", err)
 	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(append(data, '\n')); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return fmt.Errorf("write state: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("close state: %w", err)
+	}
+	if err := os.Rename(tmpName, statePath()); err != nil {
+		os.Remove(tmpName)
+		return fmt.Errorf("rename state: %w", err)
+	}
+	return nil
 }
 
 type firedBlock struct {
@@ -457,7 +484,9 @@ func main() {
 
 	cfg := config.NaggerConfig{ResetWeekday: 0, ResetHour: 11, ResetTZOffset: 7, QuotaEnabled: true} // migrated defaults
 	if err := config.Load("nagger", &cfg); err != nil {
-		log.Printf("warning: could not load nagger config: %v", err)
+		// A malformed nagger.json used to be logged and ignored, silently
+		// restoring defaults (quota nag back on, spend budget 0 = off).
+		log.Fatalf("nagger: could not load nagger config: %v — refusing to run with defaults", err)
 	}
 
 	enabled := os.Getenv("ENABLE_TELEGRAM") == "true"
@@ -470,7 +499,10 @@ func main() {
 	if cfg.QuotaEnabled {
 		nags = append([]Nag{quotaNag(cfg)}, nags...)
 	}
-	state := readState()
+	state, err := readState()
+	if err != nil {
+		log.Fatalf("nagger: %v — refusing to run with unreadable state (it would re-send every nag)", err)
+	}
 	spend, commitSpend := spendNags(cfg, state, now)
 	nags = append(nags, spend...)
 
@@ -489,7 +521,9 @@ func main() {
 	if len(fired) == 0 {
 		fmt.Println("Nothing due — skipping.")
 		if enabled {
-			writeState(state) // keep this run's balance reading in the spend ledger
+			if err := writeState(state); err != nil {
+				log.Fatalf("nagger: %v", err) // keep this run's balance reading in the spend ledger
+			}
 		}
 		return
 	}
@@ -502,7 +536,9 @@ func main() {
 		return
 	}
 
-	writeState(state) // the balance reading counts even if the send fails
+	if err := writeState(state); err != nil {
+		log.Printf("warning: %v", err) // the balance reading counts even if the send fails
+	}
 	if err := buildSender().Send(msg); err != nil {
 		log.Fatalf("send failed: %v", err)
 	}
@@ -510,6 +546,10 @@ func main() {
 		state.LastFired[id] = today
 	}
 	commitSpend()
-	writeState(state)
+	if err := writeState(state); err != nil {
+		// Exiting non-zero matters: printing Sent after a failed write left the
+		// run looking clean and re-sent every nag the next hour.
+		log.Fatalf("nagger: %v (message sent but state not saved; the next run may re-send)", err)
+	}
 	fmt.Printf("Sent: %d nag(s) — %s\n", len(firedIDs), strings.Join(firedIDs, ", "))
 }

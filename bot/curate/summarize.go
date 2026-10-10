@@ -45,13 +45,13 @@ func Summarize(items []bot.Item, backend, model string, timeout time.Duration) {
 		fmt.Printf("summarize: %v\n", err)
 		return
 	}
-	match := jsonArrRE.FindString(out)
-	if match == "" {
+	match, ok := firstJSONArray(out)
+	if !ok {
 		fmt.Printf("summarize: no JSON array (raw: %q)\n", truncate(out, 200))
 		return
 	}
 	var summaries []string
-	if err := json.Unmarshal([]byte(match), &summaries); err != nil {
+	if err := json.Unmarshal(match, &summaries); err != nil {
 		fmt.Printf("summarize: parse: %v (raw: %q)\n", err, truncate(out, 200))
 		return
 	}

@@ -1,12 +1,43 @@
 package main
 
 import (
+	"os"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/0x7461/guild/config"
 )
+
+func TestStateRoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	st := &naggerState{LastFired: map[string]string{"quota": "2026-10-10"}}
+	if err := writeState(st); err != nil {
+		t.Fatalf("writeState: %v", err)
+	}
+	got, err := readState()
+	if err != nil {
+		t.Fatalf("readState: %v", err)
+	}
+	if got.LastFired["quota"] != "2026-10-10" {
+		t.Errorf("LastFired[quota] = %q, want 2026-10-10", got.LastFired["quota"])
+	}
+}
+
+func TestReadStateRejectsTruncated(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A half-written file used to read back as an empty map, which re-fired
+	// every nag and dropped the spend ledger. It must be an error instead.
+	if err := os.WriteFile(statePath(), []byte(`{"lastFired":{"quota":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readState(); err == nil {
+		t.Fatal("readState accepted a truncated state.json; want an error")
+	}
+}
 
 func TestClamp(t *testing.T) {
 	tests := []struct {

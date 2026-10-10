@@ -60,13 +60,13 @@ func renderLines(items []bot.Item) []string {
 	for _, it := range items {
 		feed := it.Meta["feed"]
 		line := fmt.Sprintf("• [%s] <a href=\"%s\">%s</a>",
-			escapeHTML(feed), it.URL, escapeHTML(it.Title))
+			escapeHTML(feed), escapeHTML(it.URL), escapeHTML(it.Title))
 		if disc := it.Meta["discussion"]; disc != "" {
 			label := it.Meta["discussion_label"]
 			if label == "" {
 				label = "Discussion"
 			}
-			line += fmt.Sprintf(" · <a href=\"%s\">%s</a>", disc, escapeHTML(label))
+			line += fmt.Sprintf(" · <a href=\"%s\">%s</a>", escapeHTML(disc), escapeHTML(label))
 		}
 		if summary := it.Meta["summary"]; summary != "" {
 			line += fmt.Sprintf("\n  <i>%s</i>", escapeHTML(summary))

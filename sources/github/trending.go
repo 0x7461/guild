@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/0x7461/guild/bot"
 	"github.com/0x7461/guild/compress"
@@ -23,7 +24,10 @@ func (s *TrendingSource) Fetch() ([]bot.Item, error) {
 		period = "weekly"
 	}
 
-	resp, err := http.Get(fmt.Sprintf("https://github.com/trending?since=%s", period))
+	// A bare http.Get has no timeout: a stalled GitHub connection could hang
+	// scanner/paperboy forever.
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(fmt.Sprintf("https://github.com/trending?since=%s", period))
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch page: %w", err)
 	}

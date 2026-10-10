@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -68,6 +69,9 @@ func (b *Bot) Run() error {
 		return fmt.Errorf("fetch: %w", err)
 	}
 	message := b.Formatter.Format(items)
+	if strings.TrimSpace(message) == "" {
+		return nil // nothing to send — don't emit a header-only message
+	}
 	if err := b.Sender.Send(message); err != nil {
 		return fmt.Errorf("send: %w", err)
 	}

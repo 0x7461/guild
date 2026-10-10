@@ -15,6 +15,11 @@ type Formatter struct {
 }
 
 func (f *Formatter) Format(items []bot.Item) string {
+	// No items means no digest: a header-only message reads as a delivered
+	// digest and hides the empty fetch.
+	if len(items) == 0 {
+		return ""
+	}
 	// Group by source, preserving the order sources first appear.
 	var order []string
 	groups := map[string][]bot.Item{}

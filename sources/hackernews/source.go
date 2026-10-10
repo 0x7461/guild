@@ -96,7 +96,7 @@ func (s *Source) annotate(items []bot.Item) {
 		if id == "" {
 			continue
 		}
-		if ctx := topComments(id, 6, 300); ctx != "" {
+		if ctx := topLevelComments(id, 6, 300); ctx != "" {
 			items[i].Meta["context"] = ctx
 		}
 	}
@@ -148,9 +148,11 @@ type itemNode struct {
 	Children []itemNode `json:"children"`
 }
 
-// topComments returns the n highest-scored root comments, each stripped and
-// truncated to maxChars, joined into a single context blob.
-func topComments(id string, n, maxChars int) string {
+// topLevelComments returns the first n top-level comments, each stripped and
+// truncated to maxChars, joined into a single context blob. HN's Algolia API
+// gives comment nodes no score, so a "top" ranking isn't available — the old
+// sort-by-points was a no-op that just took thread order.
+func topLevelComments(id string, n, maxChars int) string {
 	resp, err := httpClient.Get("https://hn.algolia.com/api/v1/items/" + id)
 	if err != nil {
 		return ""
@@ -169,7 +171,6 @@ func topComments(id string, n, maxChars int) string {
 			kids = append(kids, c)
 		}
 	}
-	sort.SliceStable(kids, func(i, j int) bool { return kids[i].Points > kids[j].Points })
 	if len(kids) > n {
 		kids = kids[:n]
 	}

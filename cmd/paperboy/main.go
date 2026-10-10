@@ -49,6 +49,11 @@ func main() {
 	if err := config.Load("paperboy", &cfg); err != nil {
 		log.Printf("Warning: could not load paperboy config: %v", err)
 	}
+	// A non-positive target silently kept an empty selection (and panicked when
+	// negative), while the caller still marked every item seen.
+	if cfg.Source.Curate.Enabled && cfg.Source.Curate.Target < 1 {
+		log.Fatalf("paperboy: source.curate.target must be >= 1 when curate is enabled (got %d)", cfg.Source.Curate.Target)
+	}
 
 	feeds := defaultFeeds
 	if len(cfg.Source.Feeds) > 0 {
@@ -201,7 +206,9 @@ func main() {
 func buildCurator(cc config.CurateConfig) curate.Curator {
 	timeout := time.Duration(cc.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
-		timeout = 60 * time.Second
+		// Cold Ollama runs cost ~4.5 min (AGENTS.md) — the old 60s cap failed
+		// every one of them.
+		timeout = 600 * time.Second
 	}
 	primary := backendFor(cc.Backend, cc.Model, timeout)
 	fallback := backendFor(cc.FallbackBackend, cc.FallbackModel, timeout)

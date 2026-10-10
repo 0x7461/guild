@@ -53,9 +53,10 @@ func (s *RSSSource) Fetch() ([]bot.Item, error) {
 			if desc == "" {
 				desc = entry.Content
 			}
-			// Trim description to a reasonable length
-			if len(desc) > 200 {
-				desc = desc[:200] + "…"
+			// Trim description to a reasonable length, on a rune boundary — a byte
+			// slice through a multibyte rune produced invalid UTF-8.
+			if runes := []rune(desc); len(runes) > 200 {
+				desc = string(runes[:200]) + "…"
 			}
 
 			meta := map[string]string{

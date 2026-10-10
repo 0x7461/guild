@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 
@@ -177,15 +176,32 @@ func runClaudeText(model string, timeout time.Duration, prompt string) (string, 
 	return string(output), nil
 }
 
-var jsonArrRE = regexp.MustCompile(`(?s)\[.*\]`)
+// firstJSONArray returns the first '['-anchored substring that decodes as a JSON
+// value. The old greedy `(?s)\[.*\]` regex spanned from a '[' in the model's
+// prose to the last ']', so decode failed and the annotations were skipped.
+func firstJSONArray(output string) ([]byte, bool) {
+	for i := 0; i < len(output); i++ {
+		if output[i] != '[' {
+			continue
+		}
+		var raw json.RawMessage
+		if err := json.NewDecoder(strings.NewReader(output[i:])).Decode(&raw); err != nil {
+			continue
+		}
+		if len(raw) > 0 && raw[0] == '[' {
+			return raw, true
+		}
+	}
+	return nil, false
+}
 
 func parseAnnotations(output string) ([]Annotation, error) {
-	match := jsonArrRE.FindString(output)
-	if match == "" {
+	match, ok := firstJSONArray(output)
+	if !ok {
 		return nil, fmt.Errorf("no JSON array found")
 	}
 	var anns []Annotation
-	if err := json.Unmarshal([]byte(match), &anns); err != nil {
+	if err := json.Unmarshal(match, &anns); err != nil {
 		return nil, err
 	}
 	return anns, nil
