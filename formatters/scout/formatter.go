@@ -58,7 +58,7 @@ func (f *Formatter) Format(items []bot.Item) string {
 func writeHN(sb *strings.Builder, n int, item bot.Item) {
 	sb.WriteString(fmt.Sprintf("<b>%d. %s</b>  <code>%s</code>\n", n, escapeHTML(item.Title), escapeHTML(item.Meta["hn_type"])))
 	stat := fmt.Sprintf("%s points · %s comments", item.Meta["points"], item.Meta["comments"])
-	sb.WriteString(fmt.Sprintf("<a href=\"%s\">%s</a>\n", item.URL, escapeHTML(stat)))
+	sb.WriteString(fmt.Sprintf("<a href=\"%s\">%s</a>\n", escapeHTML(item.URL), escapeHTML(stat)))
 	if summary := item.Meta["summary"]; summary != "" {
 		sb.WriteString(fmt.Sprintf("<i>%s</i>\n", escapeHTML(summary)))
 	}
@@ -69,7 +69,7 @@ func writeHN(sb *strings.Builder, n int, item bot.Item) {
 
 func writeGitHub(sb *strings.Builder, n int, item bot.Item) {
 	sb.WriteString(fmt.Sprintf("<b>%d. %s</b>\n", n, escapeHTML(item.Title)))
-	sb.WriteString(fmt.Sprintf("<a href=\"%s\">View on GitHub</a>\n", item.URL))
+	sb.WriteString(fmt.Sprintf("<a href=\"%s\">View on GitHub</a>\n", escapeHTML(item.URL)))
 	if item.Description != "" {
 		sb.WriteString(fmt.Sprintf("%s\n", escapeHTML(item.Description)))
 	}
@@ -92,5 +92,7 @@ func escapeHTML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
+	// Escaping the quote keeps href="…" intact when a URL contains one.
+	s = strings.ReplaceAll(s, "\"", "&quot;")
 	return s
 }
