@@ -14,10 +14,25 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/0x7461/guild/bot"
 )
+
+// claudeDeadOnce prints the dead-lane warning once per process. The claude-code
+// path is kept rather than deleted (CC may come back), but since 2026-10-11
+// `claude -p` answers every call with "Your organization has disabled Claude
+// subscription access for Claude Code", so a run that reaches it gets no output.
+// Loud, because the caller's error path otherwise looks like any other failure.
+var claudeDeadOnce sync.Once
+
+func warnClaudeDead() {
+	claudeDeadOnce.Do(func() {
+		fmt.Fprintf(os.Stderr, "curate: claude-code lane is dead since 2026-10-11 "+
+			"(the subscription refuses `claude -p`); this run cannot succeed — set the backend to ollama\n")
+	})
+}
 
 // Curator ranks items and returns at most `target` of them, ordered best-first.
 type Curator interface {
@@ -47,7 +62,8 @@ func (c *ChainCurator) Curate(items []bot.Item, target int) ([]bot.Item, error) 
 }
 
 // ClaudeCodeCurator shells out to `claude -p` (without --bare — see the note in
-// Curate: --bare would skip auth discovery too).
+// Curate: --bare would skip auth discovery too). **Dead lane since 2026-10-11** —
+// kept for a possible CC return; the first call warns.
 type ClaudeCodeCurator struct {
 	Model   string        // "haiku" | "sonnet" | "opus" — or full model ID
 	Timeout time.Duration // hard wall-clock cap
@@ -65,6 +81,7 @@ func (c *ClaudeCodeCurator) Curate(items []bot.Item, target int) ([]bot.Item, er
 	if len(items) == 0 {
 		return nil, nil
 	}
+	warnClaudeDead()
 	model := c.Model
 	if full, ok := claudeModelMap[model]; ok {
 		model = full

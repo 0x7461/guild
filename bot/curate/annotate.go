@@ -89,6 +89,7 @@ func runText(backend, model string, timeout time.Duration, prompt string) (strin
 	case "ollama":
 		return runOllamaText(model, timeout, prompt)
 	case "claude-code":
+		warnClaudeDead()
 		return runClaudeText(model, timeout, prompt)
 	case "":
 		return "", fmt.Errorf("no backend configured")
