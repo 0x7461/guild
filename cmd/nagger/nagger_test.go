@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
@@ -30,7 +29,7 @@ func TestReadStateRejectsTruncated(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A half-written file used to read back as an empty map, which re-fired
-	// every nag and dropped the spend ledger. It must be an error instead.
+	// every nag. It must be an error instead.
 	if err := os.WriteFile(statePath(), []byte(`{"lastFired":{"quota":`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -190,12 +189,6 @@ func TestDueNag(t *testing.T) {
 			want:  false,
 		},
 		{
-			name:  "interval 0 (spend): evaluated every run",
-			nag:   Nag{ID: "spend", IntervalDays: 0},
-			state: map[string]string{"spend": "2026-03-10"},
-			want:  true,
-		},
-		{
 			name:  "unparseable last-fired falls back to anchor (future)",
 			nag:   Nag{ID: "r", IntervalDays: 30, Anchor: "2026-04-01"},
 			state: map[string]string{"r": "garbage"},
@@ -275,158 +268,5 @@ func TestReminderNagsSkipsInvalid(t *testing.T) {
 	nags := reminderNags(cfg)
 	if len(nags) != 1 || nags[0].ID != "ok" {
 		t.Fatalf("reminderNags = %v, want just the valid 'ok' nag", nags)
-	}
-}
-
-func TestAdvanceLedgerFirstRun(t *testing.T) {
-	l, spend := advanceLedger(nil, 12.5, "2026-03")
-	want := spendLedger{Month: "2026-03", StartBalance: 12.5, LastBalance: 12.5}
-	if !reflect.DeepEqual(l, want) {
-		t.Errorf("advanceLedger(nil, 12.5, 2026-03) = %+v, want %+v", l, want)
-	}
-	if spend != 0 {
-		t.Errorf("first-run spend = %v, want 0", spend)
-	}
-}
-
-func TestAdvanceLedgerNewMonthRestarts(t *testing.T) {
-	prev := &spendLedger{
-		Month: "2026-03", StartBalance: 10, Topups: 5, LastBalance: 8,
-		Fired: []float64{0.5, 0.8},
-	}
-	l, spend := advanceLedger(prev, 20, "2026-04")
-
-	want := spendLedger{Month: "2026-04", StartBalance: 20, LastBalance: 20}
-	if !reflect.DeepEqual(l, want) {
-		t.Errorf("new-month ledger = %+v, want %+v (ledger must restart)", l, want)
-	}
-	if spend != 0 {
-		t.Errorf("new-month spend = %v, want 0", spend)
-	}
-	if len(prev.Fired) != 2 || prev.Topups != 5 || prev.StartBalance != 10 {
-		t.Errorf("advanceLedger mutated the previous month's ledger: %+v", prev)
-	}
-}
-
-func TestAdvanceLedgerSpend(t *testing.T) {
-	month := "2026-03"
-	prev := &spendLedger{Month: month, StartBalance: 10, LastBalance: 10}
-
-	l, spend := advanceLedger(prev, 7.5, month)
-	if l.Topups != 0 {
-		t.Errorf("topups on a decrease = %v, want 0", l.Topups)
-	}
-	if l.LastBalance != 7.5 {
-		t.Errorf("last balance = %v, want 7.5", l.LastBalance)
-	}
-	if spend != 2.5 {
-		t.Errorf("spend after a decrease = %v, want 2.5", spend)
-	}
-}
-
-// A balance rise is a top-up, never negative spend. A rise to the starting
-// balance yields exactly zero spend, not a negative value.
-func TestAdvanceLedgerRiseIsTopup(t *testing.T) {
-	month := "2026-03"
-	prev := &spendLedger{Month: month, StartBalance: 10, LastBalance: 10}
-
-	l, spend := advanceLedger(prev, 12, month)
-	if l.Topups != 2 {
-		t.Errorf("topups after a rise = %v, want 2", l.Topups)
-	}
-	if l.LastBalance != 12 {
-		t.Errorf("last balance = %v, want 12", l.LastBalance)
-	}
-	if spend != 0 {
-		t.Errorf("spend after a rise to start+topup = %v, want 0 (never negative)", spend)
-	}
-
-	// A later decrease then measures real spend against the topped-up budget.
-	l2, spend2 := advanceLedger(&l, 9, month)
-	if l2.Topups != 2 {
-		t.Errorf("topups after a subsequent decrease = %v, want 2", l2.Topups)
-	}
-	if spend2 != 3 {
-		t.Errorf("spend after a decrease = %v, want 3", spend2)
-	}
-}
-
-// A multi-reading sequence: spend accumulates through a mid-month top-up.
-func TestAdvanceLedgerSequence(t *testing.T) {
-	month := "2026-03"
-	readings := []float64{20, 15, 12, 25, 20}
-	wantSpend := []float64{0, 5, 8, 8, 13}
-
-	var l *spendLedger
-	for i, b := range readings {
-		next, spend := advanceLedger(l, b, month)
-		if spend != wantSpend[i] {
-			t.Errorf("reading %d (balance %v): spend = %v, want %v", i, b, spend, wantSpend[i])
-		}
-		l = &next
-	}
-	if l.Topups != 13 {
-		t.Errorf("total top-ups = %v, want 13", l.Topups)
-	}
-}
-
-// Cloning Fired matters: the send path appends only on success, so a retry must
-// not mutate the previous ledger.
-func TestAdvanceLedgerClonesFired(t *testing.T) {
-	prev := &spendLedger{Month: "2026-03", StartBalance: 10, LastBalance: 10, Fired: []float64{0.5}}
-	l, _ := advanceLedger(prev, 9, "2026-03")
-	l.Fired = append(l.Fired, 0.8)
-
-	if len(prev.Fired) != 1 || prev.Fired[0] != 0.5 {
-		t.Errorf("advanceLedger aliased Fired: prev = %v", prev.Fired)
-	}
-	if len(l.Fired) != 2 {
-		t.Errorf("returned ledger Fired = %v, want two entries", l.Fired)
-	}
-}
-
-func TestNewlyCrossed(t *testing.T) {
-	fractions := []float64{0.5, 0.8, 0.9}
-
-	tests := []struct {
-		name  string
-		spend float64
-		quota float64
-		fired []float64
-		want  []float64
-	}{
-		{"no spend", 0, 100, nil, nil},
-		{"below all", 20, 100, nil, nil},
-		{"exactly at 50% fires", 50, 100, nil, []float64{0.5}},
-		{"just past 50%", 50.01, 100, nil, []float64{0.5}},
-		{"crosses two at once", 85, 100, nil, []float64{0.5, 0.8}},
-		{"over budget crosses all", 150, 100, nil, []float64{0.5, 0.8, 0.9}},
-		{"already fired 50, now 85", 85, 100, []float64{0.5}, []float64{0.8}},
-		{"all fired, nothing new", 95, 100, []float64{0.5, 0.8, 0.9}, nil},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := newlyCrossed(tt.spend, tt.quota, fractions, tt.fired)
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("newlyCrossed(%v, %v, %v, %v) = %v, want %v",
-					tt.spend, tt.quota, fractions, tt.fired, got, tt.want)
-			}
-		})
-	}
-}
-
-// Unsorted config fractions still come back ascending, and each fraction fires
-// at most once per month (it is filtered against fired).
-func TestNewlyCrossedUnsortedAndOncePerMonth(t *testing.T) {
-	got := newlyCrossed(95, 100, []float64{0.9, 0.5, 0.8}, nil)
-	want := []float64{0.5, 0.8, 0.9}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("unsorted fractions = %v, want ascending %v", got, want)
-	}
-
-	got = newlyCrossed(95, 100, []float64{0.9, 0.5, 0.8}, []float64{0.5, 0.9})
-	want = []float64{0.8}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("already-fired fractions = %v, want %v", got, want)
 	}
 }

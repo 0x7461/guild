@@ -80,12 +80,6 @@ type NaggerConfig struct {
 	QuotaEnabled bool `json:"quota_enabled"`
 
 	Reminders []Reminder `json:"reminders"` // recurring manual-task nudges (quarterly archive chores, etc.)
-
-	// SpendQuotaUSD is the monthly DeepSeek spend budget; 0 disables the spend
-	// nag. WarnFractions are the budget fractions that each warn once per month
-	// (default 0.5, 0.8, 0.9 — set in cmd/nagger).
-	SpendQuotaUSD float64   `json:"spend_quota_usd"`
-	WarnFractions []float64 `json:"warn_fractions"`
 }
 
 // Reminder is a recurring manual-task nudge fired by nagger on a fixed-day

@@ -5,6 +5,8 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- **2026-10-19** — **nagger: `spend` nag retired.** The monthly DeepSeek prepaid-budget warning is gone with the cutover to OpenCode Go ($10 flat, no balance to run out, and no API to query Go's allowance). Removed `spend_quota_usd` + `warn_fractions` from `NaggerConfig` and `nagger.json`, the balance endpoint + month ledger (`advanceLedger`/`newlyCrossed`) and their tests. `quota` stays dormant; `reminder` unchanged.
+
 - **2026-10-11** — **`claude-code` warns; it cannot run.** The subscription refuses `claude -p` since the cutover, so both paths (`ClaudeCodeCurator`, `runClaudeText`) are selectable-but-unreachable. Kept for a possible CC return; `warnClaudeDead` prints the date and the fix once per process at the first dispatch, and `warn_test.go` asserts it through the real `Curate` path.
 
 - **2026-10-02** — **Renamed botkit → guild** (#89 town-roles theme: where the bots are made and belong). Go module `github.com/0x7461/guild`, config `~/.config/guild/`, data `~/.local/share/guild/` (paperboy's `rss-seen.db`), the repo folder and GitHub repo. The bots keep their names: nagger, paperboy, scout.

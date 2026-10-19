@@ -1,19 +1,17 @@
 // nagger — daily Telegram nudges from a unified set of periodic "nags": the
-// Claude weekly-quota pace check, the monthly DeepSeek spend budget, and
-// recurring manual-task reminders. Each nag is a periodic signal (interval +
-// anchor + renderer); one snooze run evaluates them all, fires the due ones as a
-// single combined message (grouped under headers), and dedups per-nag via
-// ~/.local/share/nagger/state.json. Run hourly 08–22 by runit + snooze; the
-// per-nag dedup makes re-runs idempotent.
+// Claude weekly-quota pace check and recurring manual-task reminders. Each nag is
+// a periodic signal (interval + anchor + renderer); one snooze run evaluates them
+// all, fires the due ones as a single combined message (grouped under headers),
+// and dedups per-nag via ~/.local/share/nagger/state.json. Run hourly 08–22 by
+// runit + snooze; the per-nag dedup makes re-runs idempotent.
 //
 // Inputs:
 //   - ~/.local/share/nagger/rate-limits.json  (written by ~/.claude/statusline.sh
 //     after every CC response — external producer, do not move)
-//   - ~/.config/guild/nagger.json            (quota reset anchor, spend budget, reminders)
-//   - ~/.config/deepseek/key_void             (DeepSeek API key, for the balance)
-//   - ~/.local/share/nagger/state.json        (per-nag last-fired dates + the spend
-//     ledger, owned here; migrated from the flat id→date map and, before that,
-//     the legacy last-sent + reminders-state.json files)
+//   - ~/.config/guild/nagger.json            (quota reset anchor, reminders)
+//   - ~/.local/share/nagger/state.json        (per-nag last-fired dates, owned here;
+//     migrated from the flat id→date map and, before that, the legacy last-sent +
+//     reminders-state.json files)
 package main
 
 import (
@@ -21,12 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
-	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -122,8 +116,7 @@ func formatReset(ts int64) string {
 
 // Nag is one periodic signal. It fires when today >= last-fired + IntervalDays;
 // when never fired, it fires at >= Anchor, or immediately when Anchor is empty
-// (the quota case). IntervalDays 0 = evaluated every run; Render does its own
-// dedup (the spend case). Nags sharing a Group render under one header in the combined
+// (the quota case). Nags sharing a Group render under one header in the combined
 // message. Render returns the message block and ok=false to skip firing.
 type Nag struct {
 	ID           string
@@ -138,7 +131,7 @@ type Nag struct {
 var groupHeader = map[string]string{
 	"reminder": "🔔 Quarterly archive reminder — not urgent, do when convenient:",
 }
-var groupOrder = []string{"reminder", "quota", "spend"}
+var groupOrder = []string{"reminder", "quota"}
 
 func parseDay(s string) (time.Time, bool) {
 	t, err := time.Parse("2006-01-02", s)
@@ -161,12 +154,9 @@ func dueNag(n Nag, state map[string]string, today time.Time) bool {
 
 func statePath() string { return filepath.Join(stateDir(), "state.json") }
 
-// naggerState is state.json: per-nag last-fired dates plus the spend nag's
-// month ledger. The spend nag dedups on Spend.Fired (once per threshold per
-// month), not on LastFired — a date key would hide a second crossing the same day.
+// naggerState is state.json: per-nag last-fired dates.
 type naggerState struct {
 	LastFired map[string]string `json:"lastFired"`
-	Spend     *spendLedger      `json:"spend,omitempty"`
 }
 
 // readState loads state.json. A flat id→date map (the format until 2026-09-29)
@@ -179,7 +169,7 @@ func readState() (*naggerState, error) {
 		var probe map[string]json.RawMessage
 		if err := json.Unmarshal(data, &probe); err != nil {
 			// A truncated state.json used to read back as an empty map, so every
-			// reminder re-fired and the spend ledger was lost. Refuse instead.
+			// reminder re-fired. Refuse instead.
 			return nil, fmt.Errorf("state.json is not valid JSON: %w", err)
 		}
 		if _, nested := probe["lastFired"]; nested {
@@ -340,128 +330,6 @@ func quotaNag(cfg config.NaggerConfig) Nag {
 	}
 }
 
-// --- DeepSeek monthly spend budget ---
-//
-// DeepSeek exposes a balance, not spend, so spend is derived from a month
-// ledger of balance readings. The trap is top-ups: a mid-month top-up raises the
-// balance and would read as negative spend, resetting the budget — so a rise is
-// recorded as a top-up instead. The ledger measures the whole account, not this
-// machine: if the key is ever used elsewhere, that spend counts too.
-
-const deepseekBalanceURL = "https://api.deepseek.com/user/balance"
-
-type spendLedger struct {
-	Month        string    `json:"month"`         // YYYY-MM, local time
-	StartBalance float64   `json:"start_balance"` // first reading of the month
-	Topups       float64   `json:"topups"`        // balance rises seen this month
-	LastBalance  float64   `json:"last_balance"`
-	Fired        []float64 `json:"fired"` // warn fractions already sent this month
-}
-
-func deepseekBalance() (float64, error) {
-	home, _ := os.UserHomeDir()
-	key, err := os.ReadFile(filepath.Join(home, ".config", "deepseek", "key_void"))
-	if err != nil {
-		return 0, fmt.Errorf("read API key: %w", err)
-	}
-	req, err := http.NewRequest(http.MethodGet, deepseekBalanceURL, nil)
-	if err != nil {
-		return 0, err
-	}
-	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(string(key)))
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("balance API returned HTTP %d", resp.StatusCode)
-	}
-	var body struct {
-		BalanceInfos []struct {
-			Currency     string `json:"currency"`
-			TotalBalance string `json:"total_balance"`
-		} `json:"balance_infos"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return 0, fmt.Errorf("decode balance: %w", err)
-	}
-	for _, b := range body.BalanceInfos {
-		if b.Currency == "USD" {
-			return strconv.ParseFloat(b.TotalBalance, 64)
-		}
-	}
-	return 0, fmt.Errorf("no USD balance in the response")
-}
-
-// advanceLedger folds one balance reading into the month ledger and returns it
-// with the spend so far this month. A new month starts over from this reading.
-func advanceLedger(prev *spendLedger, balance float64, month string) (spendLedger, float64) {
-	if prev == nil || prev.Month != month {
-		return spendLedger{Month: month, StartBalance: balance, LastBalance: balance}, 0
-	}
-	l := *prev
-	l.Fired = slices.Clone(prev.Fired)
-	if balance > l.LastBalance {
-		l.Topups += balance - l.LastBalance
-	}
-	l.LastBalance = balance
-	return l, l.StartBalance + l.Topups - balance
-}
-
-// newlyCrossed returns, ascending, the warn fractions spend has reached that
-// haven't fired this month.
-func newlyCrossed(spend, quota float64, fractions, fired []float64) []float64 {
-	var out []float64
-	for _, f := range fractions {
-		if spend >= f*quota && !slices.Contains(fired, f) {
-			out = append(out, f)
-		}
-	}
-	sort.Float64s(out)
-	return out
-}
-
-// spendNags reads the balance once per run and returns the "spend" nag (fires
-// once per newly crossed threshold; a jump across several fires once, naming the
-// highest) or, when the balance can't be read, "spend-error" (at most daily).
-// It advances st.Spend in place. commit marks the crossed thresholds fired —
-// run it only after a successful send, so a failed send retries next run.
-func spendNags(cfg config.NaggerConfig, st *naggerState, now time.Time) (nags []Nag, commit func()) {
-	commit = func() {}
-	quota := cfg.SpendQuotaUSD
-	if quota <= 0 {
-		return nil, commit
-	}
-	balance, err := deepseekBalance()
-	if err != nil {
-		msg := fmt.Sprintf("DeepSeek spend check failed: %v. Not urgent, but the budget warning is off until it's fixed.", err)
-		return []Nag{{ID: "spend-error", Group: "spend", IntervalDays: 1,
-			Render: func(time.Time) (string, bool) { return msg, true }}}, commit
-	}
-	ledger, spend := advanceLedger(st.Spend, balance, now.Format("2006-01"))
-	st.Spend = &ledger
-
-	fractions := cfg.WarnFractions
-	if len(fractions) == 0 {
-		fractions = []float64{0.5, 0.8, 0.9}
-	}
-	crossed := newlyCrossed(spend, quota, fractions, ledger.Fired)
-	if len(crossed) == 0 {
-		return nil, commit
-	}
-	top := crossed[len(crossed)-1]
-	urgency := "Not urgent — a heads-up on pace."
-	if top >= 1 {
-		urgency = "Budget reached — decide whether to keep spending this month (the prepaid balance is the hard stop)."
-	}
-	msg := fmt.Sprintf("DeepSeek spend this month: $%.2f of the $%g budget (%.0f%%), past the %.0f%% mark. Balance $%.2f. %s",
-		spend, quota, spend/quota*100, top*100, balance, urgency)
-	commit = func() { st.Spend.Fired = append(st.Spend.Fired, crossed...) }
-	return []Nag{{ID: "spend", Group: "spend", IntervalDays: 0,
-		Render: func(time.Time) (string, bool) { return msg, true }}}, commit
-}
-
 // reminderNags expands the config reminders into nags. A reminder needs an
 // explicit anchor (never the fire-now empty-anchor path — that's quota-only).
 func reminderNags(cfg config.NaggerConfig) []Nag {
@@ -503,8 +371,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("nagger: %v — refusing to run with unreadable state (it would re-send every nag)", err)
 	}
-	spend, commitSpend := spendNags(cfg, state, now)
-	nags = append(nags, spend...)
 
 	var fired []firedBlock
 	var firedIDs []string
@@ -522,7 +388,7 @@ func main() {
 		fmt.Println("Nothing due — skipping.")
 		if enabled {
 			if err := writeState(state); err != nil {
-				log.Fatalf("nagger: %v", err) // keep this run's balance reading in the spend ledger
+				log.Fatalf("nagger: %v", err)
 			}
 		}
 		return
@@ -537,7 +403,7 @@ func main() {
 	}
 
 	if err := writeState(state); err != nil {
-		log.Printf("warning: %v", err) // the balance reading counts even if the send fails
+		log.Printf("warning: %v", err)
 	}
 	if err := buildSender().Send(msg); err != nil {
 		log.Fatalf("send failed: %v", err)
@@ -545,7 +411,6 @@ func main() {
 	for _, id := range firedIDs {
 		state.LastFired[id] = today
 	}
-	commitSpend()
 	if err := writeState(state); err != nil {
 		// Exiting non-zero matters: printing Sent after a failed write left the
 		// run looking clean and re-sent every nag the next hour.

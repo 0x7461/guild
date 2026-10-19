@@ -24,7 +24,7 @@ Adding a new bot = implement `Source`, pick a `Formatter` and `Sender`, pass to 
 
 - **paperboy** — RSS feed aggregator. HN Best, Lobsters, Techmeme, blogs. SQLite dedup. Curates daily, delivers Mon + Fri.
 - **scout** — combined weekly "what's new online" digest: GitHub trending + HN Ask/Show/Tell, ranked by points+comments, each with a one-line summary and a comment-thread sentiment read. Built on `MultiSource`. Runs weekly.
-- **nagger** — monthly DeepSeek spend budget + recurring manual-task reminders. Hourly 08–22, dedup'd per nag.
+- **nagger** — recurring manual-task reminders. Hourly 08–22, dedup'd per nag.
 
 ## Project Structure
 
