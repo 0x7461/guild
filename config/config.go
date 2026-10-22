@@ -21,7 +21,7 @@ type FeedEntry struct {
 type CurateConfig struct {
 	Enabled         bool   `json:"enabled"`
 	Target          int    `json:"target"`           // how many items to keep after ranking
-	Backend         string `json:"backend"`          // "claude-code" or "ollama"
+	Backend         string `json:"backend"`          // "claude-code", "ollama" or "openai" (OpenCode Go)
 	Model           string `json:"model"`            // backend-specific model id
 	FallbackBackend string `json:"fallback_backend"` // optional second backend
 	FallbackModel   string `json:"fallback_model"`
@@ -38,7 +38,7 @@ type ScoutConfig struct {
 	HN struct {
 		Days       int    `json:"days"`
 		Annotate   bool   `json:"annotate"`
-		Backend    string `json:"backend"` // "ollama" or "claude-code"
+		Backend    string `json:"backend"` // "openai", "ollama" or "claude-code"
 		Model      string `json:"model"`
 		TimeoutSec int    `json:"timeout_seconds"`
 	} `json:"hn"`

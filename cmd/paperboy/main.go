@@ -233,6 +233,14 @@ func backendFor(name, model string, timeout time.Duration) curate.Curator {
 		return &curate.ClaudeCodeCurator{Model: model, Timeout: timeout}
 	case "ollama":
 		return &curate.OllamaCurator{Model: model, Timeout: timeout}
+	case "openai", "opencode":
+		// OpenAI-compatible lane: OpenCode Go by default. The key lives in guild's .env
+		// (OPENCODE_API_KEY), which is gitignored — never in paperboy.json.
+		return &curate.OpenAICurator{
+			Model:   model,
+			APIKey:  os.Getenv("OPENCODE_API_KEY"),
+			Timeout: timeout,
+		}
 	default:
 		fmt.Printf("curate: unknown backend %q, skipping\n", name)
 		return nil

@@ -1,5 +1,6 @@
 // Package curate ranks RSS items by user interest using an LLM.
-// Two backends: claude-code (shell out to `claude -p`) and ollama (HTTP).
+// Three backends: claude-code (shell out to `claude -p`, dead since 2026-10-11), ollama (HTTP)
+// and openai (any OpenAI-compatible endpoint; OpenCode Go in practice).
 // A ChainCurator tries them in order; if all fail, callers pass items through
 // unchanged so the digest still ships.
 package curate
@@ -9,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -188,6 +190,88 @@ func (o *OllamaCurator) Curate(items []bot.Item, target int) ([]bot.Item, error)
 	}
 
 	return applyRanking(items, target, parsed.Response)
+}
+
+// OpenAICurator speaks the OpenAI chat-completions shape, which is what OpenCode Go serves
+// (https://opencode.ai/inference/go/v1). Added 2026-10-23 so the digest no longer depends on a
+// local Ollama: the X1C has no dGPU, and the 49 GB of models stayed on the retired machine.
+// The key comes from OPENCODE_API_KEY (guild's .env), never from the repo.
+type OpenAICurator struct {
+	Model     string        // e.g. "deepseek-v4.1-flash"
+	BaseURL   string        // default opencodeBaseURL
+	APIKey    string        // bearer token; empty means the lane is unconfigured
+	SessionID string        // x-opencode-session value; generated per run when empty
+	Timeout   time.Duration // hard wall-clock cap
+}
+
+const opencodeBaseURL = "https://opencode.ai/inference/go/v1"
+
+func (o *OpenAICurator) Name() string { return "openai/" + o.Model }
+
+func (o *OpenAICurator) Curate(items []bot.Item, target int) ([]bot.Item, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	if o.APIKey == "" {
+		return nil, fmt.Errorf("openai: no API key (set OPENCODE_API_KEY)")
+	}
+	baseURL := o.BaseURL
+	if baseURL == "" {
+		baseURL = opencodeBaseURL
+	}
+
+	reqBody, _ := json.Marshal(map[string]any{
+		"model": o.Model,
+		"messages": []map[string]string{
+			{"role": "user", "content": buildPrompt(items, target)},
+		},
+		"temperature": 0.2,
+		"stream":      false,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), o.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+o.APIKey)
+	// OpenCode Go routes on these (400 MissingSessionID without them): the session id groups a
+	// conversation for affinity, the client names who is calling.
+	session := o.SessionID
+	if session == "" {
+		session = fmt.Sprintf("guild-%s-%d", o.Model, time.Now().Unix())
+	}
+	req.Header.Set("x-opencode-session", session)
+	req.Header.Set("x-opencode-client", "guild")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openai: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
+		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("openai: decode: %w", err)
+	}
+	if len(parsed.Choices) == 0 {
+		return nil, fmt.Errorf("openai: empty choices")
+	}
+
+	return applyRanking(items, target, parsed.Choices[0].Message.Content)
 }
 
 // buildPrompt assembles the ranking prompt from the SystemPrompt template.
