@@ -5,6 +5,14 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- 2026-10-24 — **`MultiSource` errors when every sub-source fails.** The X1C booted 26 s before
+  scout's 09:00 window; all three sources skipped on `network is unreachable` and `Fetch` returned
+  an empty slice with a nil error, so the job logged `[OK] Done!` and exited 0 — an empty digest
+  indistinguishable from a quiet week, with the next window seven days away. It now returns
+  `every source failed (...)` when nothing succeeded, which reaches `Bot.Run`'s existing error path
+  and exits 1; one flaky feed still must not sink the digest. `bot/multisource_test.go` covers all
+  three cases. Root fix for the race itself is `wait-net` in scout's run script.
+
 - 2026-10-23 — **`openai` curate backend (OpenCode Go), replacing the local Ollama lane.** paperboy's
   curate step would have failed nightly on the X1C (no dGPU, 49 GB of models stayed behind). New
   `OpenAICurator` speaks `/chat/completions` against opencode.ai with the `x-opencode-session` /
