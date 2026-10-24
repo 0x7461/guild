@@ -22,8 +22,8 @@ func main() {
 	cfg.GitHub.Limit = 10
 	cfg.HN.Days = 7
 	cfg.HN.Annotate = true
-	cfg.HN.Backend = "ollama"
-	cfg.HN.Model = "gemma4:e4b"
+	cfg.HN.Backend = "openai"
+	cfg.HN.Model = "deepseek-v4.1-flash"
 	cfg.HN.TimeoutSec = 300
 	cfg.Formatter.Title = "Scout — Weekly GitHub + HN"
 	if err := config.Load("scout", &cfg); err != nil {

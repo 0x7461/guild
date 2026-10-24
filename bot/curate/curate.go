@@ -212,49 +212,77 @@ func (o *OpenAICurator) Curate(items []bot.Item, target int) ([]bot.Item, error)
 	if len(items) == 0 {
 		return nil, nil
 	}
-	if o.APIKey == "" {
-		return nil, fmt.Errorf("openai: no API key (set OPENCODE_API_KEY)")
+	out, err := openAIChat(openAIChatRequest{
+		Model:     o.Model,
+		BaseURL:   o.BaseURL,
+		APIKey:    o.APIKey,
+		SessionID: o.SessionID,
+		Timeout:   o.Timeout,
+		Prompt:    buildPrompt(items, target),
+	})
+	if err != nil {
+		return nil, err
 	}
-	baseURL := o.BaseURL
+	return applyRanking(items, target, out)
+}
+
+// openAIChatRequest is one text pass against the OpenAI-compatible lane.
+type openAIChatRequest struct {
+	Model     string        // e.g. "deepseek-v4.1-flash"
+	BaseURL   string        // default opencodeBaseURL
+	APIKey    string        // bearer token; empty means the lane is unconfigured
+	SessionID string        // x-opencode-session value; generated per call when empty
+	Timeout   time.Duration // hard wall-clock cap
+	Prompt    string
+}
+
+// openAIChat sends one user message and returns the assistant text. Shared by the
+// curator (ranking a digest) and the annotator (a note per item) so both use the
+// same endpoint, headers and error reporting.
+func openAIChat(r openAIChatRequest) (string, error) {
+	if r.APIKey == "" {
+		return "", fmt.Errorf("openai: no API key (set OPENCODE_API_KEY)")
+	}
+	baseURL := r.BaseURL
 	if baseURL == "" {
 		baseURL = opencodeBaseURL
 	}
 
 	reqBody, _ := json.Marshal(map[string]any{
-		"model": o.Model,
+		"model": r.Model,
 		"messages": []map[string]string{
-			{"role": "user", "content": buildPrompt(items, target)},
+			{"role": "user", "content": r.Prompt},
 		},
 		"temperature": 0.2,
 		"stream":      false,
 	})
 
-	ctx, cancel := context.WithTimeout(context.Background(), o.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(baseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.APIKey)
+	req.Header.Set("Authorization", "Bearer "+r.APIKey)
 	// OpenCode Go routes on these (400 MissingSessionID without them): the session id groups a
 	// conversation for affinity, the client names who is calling.
-	session := o.SessionID
+	session := r.SessionID
 	if session == "" {
-		session = fmt.Sprintf("guild-%s-%d", o.Model, time.Now().Unix())
+		session = fmt.Sprintf("guild-%s-%d", r.Model, time.Now().Unix())
 	}
 	req.Header.Set("x-opencode-session", session)
 	req.Header.Set("x-opencode-client", "guild")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openai: %w", err)
+		return "", fmt.Errorf("openai: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
-		return nil, fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("openai: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
 	var parsed struct {
@@ -265,13 +293,12 @@ func (o *OpenAICurator) Curate(items []bot.Item, target int) ([]bot.Item, error)
 		} `json:"choices"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return nil, fmt.Errorf("openai: decode: %w", err)
+		return "", fmt.Errorf("openai: decode: %w", err)
 	}
 	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("openai: empty choices")
+		return "", fmt.Errorf("openai: empty choices")
 	}
-
-	return applyRanking(items, target, parsed.Choices[0].Message.Content)
+	return parsed.Choices[0].Message.Content, nil
 }
 
 // buildPrompt assembles the ranking prompt from the SystemPrompt template.

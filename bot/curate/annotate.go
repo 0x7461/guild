@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -88,6 +89,8 @@ func runText(backend, model string, timeout time.Duration, prompt string) (strin
 	switch backend {
 	case "ollama":
 		return runOllamaText(model, timeout, prompt)
+	case "openai", "opencode":
+		return runOpenAIText(model, timeout, prompt)
 	case "claude-code":
 		warnClaudeDead()
 		return runClaudeText(model, timeout, prompt)
@@ -147,6 +150,26 @@ func runOllamaText(model string, timeout time.Duration, prompt string) (string, 
 		return "", fmt.Errorf("ollama: empty response (done_reason %q) — raise num_predict", parsed.DoneReason)
 	}
 	return parsed.Response, nil
+}
+
+// runOpenAIText runs one text pass on the OpenAI-compatible lane (OpenCode Go).
+// Added 2026-10-24 so scout's HN annotation no longer needs a local Ollama: the
+// X1C has no dGPU and no models. The key comes from OPENCODE_API_KEY, which the
+// bot picks up from guild's .env via bot.LoadEnv.
+func runOpenAIText(model string, timeout time.Duration, prompt string) (string, error) {
+	out, err := openAIChat(openAIChatRequest{
+		Model:   model,
+		APIKey:  os.Getenv("OPENCODE_API_KEY"),
+		Timeout: timeout,
+		Prompt:  prompt,
+	})
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", fmt.Errorf("openai: empty response")
+	}
+	return out, nil
 }
 
 // runClaudeText shells out to `claude -p` and returns its text output. It mirrors

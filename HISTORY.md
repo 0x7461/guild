@@ -5,6 +5,13 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- 2026-10-24 — **The last two Ollama dependencies moved to OpenCode Go (`deepseek-v4.1-flash`).**
+  `runText` gained an `openai`/`opencode` case and `OpenAICurator`'s HTTP body was factored into
+  `openAIChat`, so the curator, the annotator and the summariser now share one call path and one set
+  of headers. scout's HN annotation (`HN.Backend`) and paperboy's `source.summarize` both switched
+  from `ollama`/`gemma4:e4b`; nothing on the X1C needs a local model, and `ollama` stays in the
+  switch only as a documented option. `go build`/`go test ./...` green, both binaries rebuilt.
+
 - 2026-10-24 — **`MultiSource` errors when every sub-source fails.** The X1C booted 26 s before
   scout's 09:00 window; all three sources skipped on `network is unreachable` and `Fetch` returned
   an empty slice with a nil error, so the job logged `[OK] Done!` and exited 0 — an empty digest
