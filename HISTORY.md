@@ -5,6 +5,15 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- 2026-10-25 — **scout's digest could never be delivered.** One forced run surfaced it in a
+  minute: `telegram API error: Bad Request: message is too long`. `splitMessage` trusted each
+  `\n---\n\n` segment to fit, then assigned an oversized segment to a chunk anyway — and one
+  annotated repo entry runs 5-13 KB. Every chunk of the real digest (93,311 bytes) was over 4096,
+  so the first send was rejected. Fixed with `enforceLimit`/`hardSplit`, which no branch can bypass
+  and which cuts on rune boundaries. Second cause, same run: the `summarize` CLI's `--length short`
+  returns KBs of README, so the digest had grown to 40 messages; GitHub summaries now clip at 600
+  chars. Tests in `senders/telegram/sender_test.go`; verified by a real send (`[OK] Done!`), and
+  paperboy's curate lane verified in the same session (`ranked 61 -> 8 items`).
 - 2026-10-24 — **The last two Ollama dependencies moved to OpenCode Go (`deepseek-v4.1-flash`).**
   `runText` gained an `openai`/`opencode` case and `OpenAICurator`'s HTTP body was factored into
   `openAIChat`, so the curator, the annotator and the summariser now share one call path and one set

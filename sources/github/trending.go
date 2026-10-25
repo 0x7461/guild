@@ -18,6 +18,19 @@ type TrendingSource struct {
 	Limit     int    // keep only the top N (by trending rank); 0 = no cap
 }
 
+// maxSummaryChars caps the summarize CLI's output per repo. Its "short" length
+// still runs 2-10 KB per entry, which turned one weekly digest into 40 Telegram
+// messages (2026-10-25).
+const maxSummaryChars = 600
+
+func clip(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(r[:n])) + "…"
+}
+
 func (s *TrendingSource) Fetch() ([]bot.Item, error) {
 	period := s.Period
 	if period == "" {
@@ -66,7 +79,7 @@ func (s *TrendingSource) Fetch() ([]bot.Item, error) {
 	if s.Summarize {
 		for i := range items {
 			if summary := compress.Summarize(items[i].URL); summary != "" {
-				items[i].Meta["summary"] = summary
+				items[i].Meta["summary"] = clip(summary, maxSummaryChars)
 			}
 		}
 	}

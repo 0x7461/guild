@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/0x7461/guild/bot"
 )
@@ -66,7 +67,7 @@ func splitMessage(message string) []string {
 		if current != "" {
 			chunks = append(chunks, current)
 		}
-		return chunks
+		return enforceLimit(chunks)
 	}
 
 	// Fallback: split on newlines
@@ -75,13 +76,13 @@ func splitMessage(message string) []string {
 	current := ""
 	for _, line := range lines {
 		// Handle single lines longer than the limit by hard-splitting them
-		for len(line) > telegramMaxLen {
+		if len(line) > telegramMaxLen {
 			if current != "" {
 				chunks = append(chunks, strings.TrimRight(current, "\n"))
 				current = ""
 			}
-			chunks = append(chunks, line[:telegramMaxLen])
-			line = line[telegramMaxLen:]
+			chunks = append(chunks, hardSplit(line, telegramMaxLen)...)
+			continue
 		}
 		segment := line + "\n"
 		if len(current)+len(segment) > telegramMaxLen {
@@ -96,7 +97,43 @@ func splitMessage(message string) []string {
 	if current != "" {
 		chunks = append(chunks, strings.TrimRight(current, "\n"))
 	}
-	return chunks
+	return enforceLimit(chunks)
+}
+
+// enforceLimit splits any chunk that still exceeds the limit. A single segment
+// can be larger than a whole message — one annotated repo entry runs to several
+// KB — so neither splitting branch can be trusted to respect the limit itself.
+func enforceLimit(chunks []string) []string {
+	out := make([]string, 0, len(chunks))
+	for _, chunk := range chunks {
+		out = append(out, hardSplit(chunk, telegramMaxLen)...)
+	}
+	return out
+}
+
+// hardSplit cuts s into pieces of at most max bytes, preferring a newline and
+// falling back to a rune boundary. Telegram counts UTF-16 code units, which is
+// never more than the byte count, so a byte limit is the conservative one.
+func hardSplit(s string, max int) []string {
+	var out []string
+	for len(s) > max {
+		cut := strings.LastIndexByte(s[:max], '\n')
+		if cut <= 0 {
+			cut = max
+			for cut > 0 && !utf8.RuneStart(s[cut]) {
+				cut--
+			}
+		}
+		if cut <= 0 {
+			cut = max
+		}
+		out = append(out, strings.TrimRight(s[:cut], "\n"))
+		s = strings.TrimLeft(s[cut:], "\n")
+	}
+	if s != "" {
+		out = append(out, s)
+	}
+	return out
 }
 
 func (s *Sender) sendChunk(message string) error {
