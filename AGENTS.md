@@ -1,6 +1,6 @@
 # AGENTS.md — guild
 
-Updated: 2026-10-11
+Updated: 2026-10-29
 
 Lightweight Go framework for scheduled Telegram bots. Three interfaces (Source / Formatter / Sender) wired into one runner; each bot is its own binary on a runit + snooze schedule. Binaries: paperboy (RSS digest), scout (combined GitHub trending + HN Ask/Show/Tell — `bot.MultiSource`), and nagger (monthly DeepSeek spend budget + recurring manual-task reminders; the daily Claude-quota pace nudge is still in the code but off via `quota_enabled: false` — uses `senders/telegram` directly rather than the Source/Formatter runner).
 
