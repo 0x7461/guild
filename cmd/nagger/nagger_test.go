@@ -1,7 +1,10 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,5 +271,42 @@ func TestReminderNagsSkipsInvalid(t *testing.T) {
 	nags := reminderNags(cfg)
 	if len(nags) != 1 || nags[0].ID != "ok" {
 		t.Fatalf("reminderNags = %v, want just the valid 'ok' nag", nags)
+	}
+}
+
+func TestQuotaNagRefusesAFrozenCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(stateDir(), "rate-limits.json")
+	if err := os.WriteFile(path, []byte(`{"seven_day": 59, "seven_day_resets_at": 1791777600}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// CC stopped running 19 days ago: the resets_at is in the past, so the cycle clamps to 7/7 and
+	// the same nudge would arrive every day with nothing behind it.
+	old := time.Now().Add(-19 * 24 * time.Hour)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	nag := quotaNag(config.NaggerConfig{})
+	if msg, ok := nag.Render(time.Now()); ok {
+		t.Fatalf("quota nag fired on a 19-day-old cache: %q", msg)
+	}
+}
+
+func TestQuotaNagFiresOnAFreshCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := os.MkdirAll(stateDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(stateDir(), "rate-limits.json")
+	// A reset a day out keeps the cycle inside 1..7.
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"seven_day": 59, "seven_day_resets_at": %d}`,
+		time.Now().Add(24*time.Hour).Unix())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if msg, ok := quotaNag(config.NaggerConfig{}).Render(time.Now()); !ok || !strings.Contains(msg, "Claude quota check") {
+		t.Fatalf("quota nag did not fire on a fresh cache: ok=%v msg=%q", ok, msg)
 	}
 }

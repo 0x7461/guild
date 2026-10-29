@@ -53,16 +53,28 @@ type rateLimits struct {
 	SevenDayResetsAt int64 `json:"seven_day_resets_at"`
 }
 
-func readRateLimits() (*rateLimits, bool) {
-	data, err := os.ReadFile(filepath.Join(stateDir(), "rate-limits.json"))
+// rateLimitsMaxAge is how old the cache may be before the quota nag stops trusting it. The file is
+// written by ~/.claude/statusline.sh after every CC response, so a frozen one means CC has not run —
+// and the cycle day derived from a stale `seven_day_resets_at` clamps to 7/7 forever. That is exactly
+// what happened 2026-10-27..29: CC has had no subscription since 2026-10-10, the cache was 19 days
+// old, and the same "Day 7/7, actual 59%" nudge arrived daily with nothing behind it.
+const rateLimitsMaxAge = 8 * 24 * time.Hour
+
+func readRateLimits() (*rateLimits, time.Time, bool) {
+	path := filepath.Join(stateDir(), "rate-limits.json")
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, false
+		return nil, time.Time{}, false
 	}
 	var rl rateLimits
 	if err := json.Unmarshal(data, &rl); err != nil {
-		return nil, false
+		return nil, time.Time{}, false
 	}
-	return &rl, true
+	info, err := os.Stat(path)
+	if err != nil {
+		return &rl, time.Time{}, true
+	}
+	return &rl, info.ModTime(), true
 }
 
 func clamp(v, lo, hi int) int {
@@ -297,7 +309,15 @@ func quotaNag(cfg config.NaggerConfig) Nag {
 		Render: func(now time.Time) (string, bool) {
 			var resetsAt int64
 			var actual *int
-			if rl, ok := readRateLimits(); ok {
+			if rl, wrote, ok := readRateLimits(); ok {
+				if age := now.Sub(wrote); age > rateLimitsMaxAge {
+					// Nothing to pace: no response has been recorded for over a week, so every
+					// number below would be a memory of a different subscription.
+					log.Printf("quota nag skipped: rate-limits.json is %.0f days old (last write %s) — "+
+						"CC has not run, so there is no weekly usage to report",
+						age.Hours()/24, wrote.Format(time.RFC3339))
+					return "", false
+				}
 				resetsAt = rl.SevenDayResetsAt
 				a := rl.SevenDay
 				actual = &a
@@ -351,10 +371,15 @@ func main() {
 	bot.LoadEnv("nagger")
 
 	cfg := config.NaggerConfig{ResetWeekday: 0, ResetHour: 11, ResetTZOffset: 7, QuotaEnabled: true} // migrated defaults
-	if err := config.Load("nagger", &cfg); err != nil {
-		// A malformed nagger.json used to be logged and ignored, silently
-		// restoring defaults (quota nag back on, spend budget 0 = off).
-		log.Fatalf("nagger: could not load nagger config: %v — refusing to run with defaults", err)
+	if err := config.LoadRequired("nagger", &cfg); err != nil {
+		// A malformed nagger.json used to be logged and ignored, silently restoring defaults. A
+		// *missing* one was worse: Load tolerates it, so the quota nag came back on and every
+		// reminder vanished — which is what the X1C migration produced (the file was not in the
+		// copied set), and it nagged about a dead Claude quota for three days before anyone
+		// noticed. Neither may run on defaults.
+		log.Fatalf("nagger: %v — refusing to run with defaults "+
+			"(the quota nag defaults ON and every configured reminder would be dropped); "+
+			"restore ~/.config/guild/nagger.json", err)
 	}
 
 	enabled := os.Getenv("ENABLE_TELEGRAM") == "true"

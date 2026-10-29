@@ -4,6 +4,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -106,6 +107,21 @@ func Load(name string, v any) error {
 		return err
 	}
 	return json.Unmarshal(data, v)
+}
+
+// LoadRequired is Load for a config whose absence must not pass silently. Load's tolerance fits an
+// optional tuning file; it does not fit a bot whose config decides *what gets sent*, where a missing
+// file silently restores defaults (see cmd/nagger: the quota nag defaults on and every reminder
+// disappears). Callers get a named error and decide whether to refuse to run.
+func LoadRequired(name string, v any) error {
+	if err := Load(name, v); err != nil {
+		return err
+	}
+	path := filepath.Join(dir(), name+".json")
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	return nil
 }
 
 // Save writes v as JSON to ~/.config/guild/<name>.json, creating the dir.
