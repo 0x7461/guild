@@ -1,8 +1,11 @@
 package rss
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/0x7461/guild/bot"
 	"github.com/mmcdole/gofeed"
@@ -32,7 +35,7 @@ func (s *RSSSource) Fetch() ([]bot.Item, error) {
 			max = 5
 		}
 
-		parsed, err := parser.ParseURL(feed.URL)
+		parsed, err := fetchFeed(parser, feed.URL)
 		if err != nil {
 			// Non-fatal: log and continue with remaining feeds
 			fmt.Printf("rss: skipping %s: %v\n", feed.Name, err)
@@ -85,4 +88,44 @@ func (s *RSSSource) Fetch() ([]bot.Item, error) {
 	}
 
 	return items, nil
+}
+
+// fetchFeed fetches one feed, retrying transient network failures with backoff
+// (3 attempts, 5s then 20s). A short DNS outage otherwise empties the whole
+// window: 2026-10-24 paperboy passed wait-net, lost all 13 feeds to `network
+// is unreachable` over four minutes and queued nothing. Permanent errors (bad
+// HTTP status, parse failures) skip immediately — retrying them burns 25s and
+// cannot succeed.
+func fetchFeed(parser *gofeed.Parser, feedURL string) (*gofeed.Feed, error) {
+	return fetchFeedWithRetry(parser, feedURL, []time.Duration{5 * time.Second, 20 * time.Second})
+}
+
+func fetchFeedWithRetry(parser *gofeed.Parser, feedURL string, delays []time.Duration) (*gofeed.Feed, error) {
+	var err error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		parsed, ferr := parser.ParseURL(feedURL)
+		if ferr == nil {
+			return parsed, nil
+		}
+		err = ferr
+		if !transientNetworkError(ferr) || attempt == len(delays) {
+			return nil, err
+		}
+		fmt.Printf("rss: %s: transient failure (attempt %d of %d): %v — retrying in %s\n",
+			feedURL, attempt+1, len(delays)+1, ferr, delays[attempt])
+		time.Sleep(delays[attempt])
+	}
+	return nil, err
+}
+
+// transientNetworkError reports whether err is a network-level failure worth
+// retrying (DNS, connection, timeout) as opposed to a server verdict
+// (gofeed.HTTPError) or a content problem (decode, feed-type detection).
+func transientNetworkError(err error) bool {
+	var httpErr gofeed.HTTPError
+	if errors.As(err, &httpErr) {
+		return false
+	}
+	var uerr *url.Error
+	return errors.As(err, &uerr)
 }
