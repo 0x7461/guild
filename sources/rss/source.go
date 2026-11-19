@@ -28,6 +28,7 @@ type RSSSource struct {
 func (s *RSSSource) Fetch() ([]bot.Item, error) {
 	parser := gofeed.NewParser()
 	var items []bot.Item
+	failed := 0
 
 	for _, feed := range s.Feeds {
 		max := feed.MaxItems
@@ -38,6 +39,7 @@ func (s *RSSSource) Fetch() ([]bot.Item, error) {
 		parsed, err := fetchFeed(parser, feed.URL)
 		if err != nil {
 			// Non-fatal: log and continue with remaining feeds
+			failed++
 			fmt.Printf("rss: skipping %s: %v\n", feed.Name, err)
 			continue
 		}
@@ -87,6 +89,13 @@ func (s *RSSSource) Fetch() ([]bot.Item, error) {
 		}
 	}
 
+	// One flaky feed must not sink the fetch, but every feed failing is not a
+	// quiet day: paperboy's caller treats a fetch error as the run failing, so
+	// the finish hook records 1 and caretaker reports it — `fetched 0, deduped
+	// to 0` used to read the same whether feeds failed or nothing was new.
+	if failed > 0 && failed == len(s.Feeds) {
+		return nil, fmt.Errorf("every feed failed (%d of %d) — nothing fetched", failed, len(s.Feeds))
+	}
 	return items, nil
 }
 

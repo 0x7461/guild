@@ -67,6 +67,45 @@ func TestFetchFeedSkipsPermanentError(t *testing.T) {
 	}
 }
 
+func TestFetchFailsWhenEveryFeedFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	src := &RSSSource{Feeds: []FeedConfig{
+		{Name: "a", URL: srv.URL + "/a"},
+		{Name: "b", URL: srv.URL + "/b"},
+	}}
+	if _, err := src.Fetch(); err == nil {
+		t.Fatal("Fetch() = nil error, want every-feed-failed")
+	}
+}
+
+func TestFetchSurvivesAPartialFailure(t *testing.T) {
+	ok := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/rss+xml")
+		w.Write([]byte(feedXML))
+	}))
+	defer ok.Close()
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer dead.Close()
+
+	src := &RSSSource{Feeds: []FeedConfig{
+		{Name: "ok", URL: ok.URL},
+		{Name: "dead", URL: dead.URL},
+	}}
+	items, err := src.Fetch()
+	if err != nil {
+		t.Fatalf("Fetch() error = %v, want nil (one feed worked)", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+}
+
 func TestTransientNetworkError(t *testing.T) {
 	if transientNetworkError(gofeed.HTTPError{StatusCode: 404, Status: "Not Found"}) {
 		t.Error("HTTPError classified transient")
