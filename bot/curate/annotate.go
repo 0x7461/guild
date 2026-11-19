@@ -16,11 +16,13 @@ import (
 
 // Annotation is the per-item enrichment returned by the model.
 type Annotation struct {
+	Index     *int   `json:"index"` // the post number the model was shown; nil = model omitted it
 	Summary   string `json:"summary"`
 	Sentiment string `json:"sentiment"` // civil | mixed | heated | toxic
 }
 
 const annotatePrompt = `For each discussion-board post below, return:
+- "index": the post's number in brackets.
 - "summary": one neutral sentence on what the post and its discussion are about.
 - "sentiment": the overall tone of the comment thread, exactly one of:
   civil, mixed, heated, toxic.
@@ -29,9 +31,9 @@ Base sentiment on the comments provided. "toxic" = personal attacks, hostility,
 or pervasive bad faith; "heated" = sharp disagreement but on substance;
 "mixed" = a blend; "civil" = constructive and respectful.
 
-Return a JSON array only — no prose, no markdown fences — one object per post in
-the same order:
-[{"summary": "...", "sentiment": "..."}]
+Return a JSON array only — no prose, no markdown fences — exactly one object per
+post:
+[{"index": 0, "summary": "...", "sentiment": "..."}]
 
 Posts:
 %s`
@@ -69,17 +71,40 @@ func Annotate(items []bot.Item, backend, model string, timeout time.Duration) {
 		fmt.Printf("annotate: parse: %v (raw: %q)\n", err, truncate(out, 200))
 		return
 	}
+	pairs, ok := pairAnnotations(anns, len(items))
+	if !ok {
+		fmt.Printf("annotate: %d annotations do not cover %d items — refusing to apply\n", len(anns), len(items))
+		return
+	}
 	for i := range items {
-		if i >= len(anns) {
-			break
+		if pairs[i].Summary != "" {
+			items[i].Meta["summary"] = pairs[i].Summary
 		}
-		if anns[i].Summary != "" {
-			items[i].Meta["summary"] = anns[i].Summary
-		}
-		if anns[i].Sentiment != "" {
-			items[i].Meta["sentiment"] = strings.ToLower(strings.TrimSpace(anns[i].Sentiment))
+		if pairs[i].Sentiment != "" {
+			items[i].Meta["sentiment"] = strings.ToLower(strings.TrimSpace(pairs[i].Sentiment))
 		}
 	}
+}
+
+// pairAnnotations assigns annotations to positions by their index field and
+// reports whether the set covers every item exactly once. Positional pairing is
+// rejected: a model that skips one entry shifts every later summary onto the
+// wrong item (seen in the 2026-10-25 digest), and a wrong summary is worse than
+// none.
+func pairAnnotations(anns []Annotation, n int) ([]Annotation, bool) {
+	if len(anns) != n {
+		return nil, false
+	}
+	pairs := make([]Annotation, n)
+	seen := make([]bool, n)
+	for _, ann := range anns {
+		if ann.Index == nil || *ann.Index < 0 || *ann.Index >= n || seen[*ann.Index] {
+			return nil, false
+		}
+		seen[*ann.Index] = true
+		pairs[*ann.Index] = ann
+	}
+	return pairs, true
 }
 
 // runText dispatches one text pass to the named backend. Routing is explicit:

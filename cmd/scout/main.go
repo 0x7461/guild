@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/0x7461/guild/bot"
 	"github.com/0x7461/guild/config"
@@ -69,7 +71,10 @@ func main() {
 	b := &bot.Bot{
 		Source:    source,
 		Formatter: formatter,
-		Sender:    &telegram.Sender{Token: token, ChatID: chatID},
+		Sender: &keepLastDigest{
+			Path: lastDigestPath(),
+			Next: &telegram.Sender{Token: token, ChatID: chatID},
+		},
 	}
 
 	fmt.Println("Fetching scout digest (GitHub + HN)...")
@@ -77,4 +82,35 @@ func main() {
 		log.Fatalf("Bot error: %v", err)
 	}
 	fmt.Println("[OK] Done!")
+}
+
+// keepLastDigest writes the formatted digest to a file before forwarding to the
+// real sender. A sent digest was previously unrecorded (it is printed only in
+// the dry run), so a mispaired annotation could ship with no copy to inspect.
+// The write is best-effort: a failed log must not cost the digest itself.
+type keepLastDigest struct {
+	Path string
+	Next bot.Sender
+}
+
+func (k keepLastDigest) Send(message string) error {
+	if k.Path != "" {
+		readable := strings.ReplaceAll(message, bot.MessageBreak, "\n\n")
+		if err := os.WriteFile(k.Path, []byte(readable), 0o644); err != nil {
+			log.Printf("could not keep last digest at %s: %v", k.Path, err)
+		}
+	}
+	return k.Next.Send(message)
+}
+
+// lastDigestPath returns where the last sent digest is kept, overridable via
+// SCOUT_LAST_DIGEST.
+func lastDigestPath() string {
+	if p := os.Getenv("SCOUT_LAST_DIGEST"); p != "" {
+		return p
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".local", "share", "guild", "scout-last-digest.txt")
+	}
+	return ""
 }
