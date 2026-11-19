@@ -5,6 +5,28 @@ Split from `PLAN.md` 2026-09-02 (see `agent-docs/PLAN.md` → the `HISTORY.md` t
 
 ---
 
+- 2026-11-19 — **An every-feed failure now fails the run (the flapping item's option b, shipped).**
+  `fetched 0, deduped to 0` used to read the same whether every feed failed or nothing was new.
+  `RSSSource.Fetch` returns `every feed failed (N of N)` when nothing succeeded; paperboy's
+  fetch-error path exits 1, the finish hook records it, caretaker reports the streak. Partial
+  failures still pass through (MultiSource convention); scout's half was already covered by
+  MultiSource's 2026-10-24 "every source failed" error. Tests: all-fail errors, partial passes.
+- 2026-11-19 — **scout's HN annotations could land on the wrong item.** `curate.Annotate` paired
+  `anns[i]` with `items[i]` positionally and guarded only a short tail, so one entry the model
+  skipped shifted every later summary onto the wrong item (the 2026-10-25 digest: eMudhra's summary
+  under "Median product lifespan", item 7 carrying "Steal My Bitcoin", item 12 empty). The prompt
+  already labelled each post `[i]`, so it now asks for the index back per object; `pairAnnotations`
+  matches on it and refuses to apply unless the set covers every item exactly once — a wrong summary
+  is worse than none. A sent digest was also never recorded (printed only in the dry run), so
+  `cmd/scout` gained a `keepLastDigest` sender tee writing `~/.local/share/guild/scout-last-digest.txt`
+  before forwarding, best-effort. Tests: `pairAnnotations` (7 cases) + index parsing. Still unverified:
+  the next real HN annotate run (Sat 09:00).
+- 2026-11-19 — **A DNS blip no longer empties paperboy's whole window.** 2026-10-24 the bot passed
+  `wait-net`, lost all 13 feeds to `network is unreachable` over four minutes and queued nothing.
+  `fetchFeed` in `sources/rss` now retries transient failures (3 attempts, 5s then 20s backoff) and
+  skips permanent ones (gofeed.HTTPError, decode, feed-type) immediately — retrying those cannot
+  succeed. Delays injectable via `fetchFeedWithRetry` (httptest-based tests: retry-then-success,
+  no-retry-on-404, error classification). Option (b) — `fetched 0` vs `failed 0` — stays in the backlog.
 - 2026-10-29 — **The quota nudge had been pacing a subscription that ended three weeks earlier, and the reminders were gone with its config file.** Three mornings in a row (2026-10-27/28/29) nagger sent the same "Claude quota check — Day 7/7, actual 59%" at 12:00 local. Two independent faults. **(1) The config file no longer existed.** `~/.config/guild/nagger.json` was not in the X1C migration's copied set (the plan enumerated `~/.local/share/nagger/{state.json,rate-limits.json}` and never the config), and `config.Load` documents that a missing file leaves the struct untouched — so the hardcoded default `QuotaEnabled: true` came back **and all three reminders vanished** (`ig-liked`, `msgr-e2e` at 91 days, `pi-smoke` at 365 — still in `state.json` from their last fires). New `config.LoadRequired` refuses a missing file, and nagger uses it: the failure names the path and what would be lost, instead of silently running on defaults. **(2)** `rate-limits.json` was last written **2026-10-10** — the day CC's subscription ended — so `seven_day_resets_at` was long past, `getCycleDay` clamped to 7/7, and the pace line reported 59% from a departed window. The nag now refuses to fire when the cache is older than 8 days and logs why: a frozen cache is evidence there is nothing to pace, not a reading. Config restored with `quota_enabled: false` and the three reminders, and **chezmoi-managed from now on** so a reinstall cannot lose it again. Verified: `go test ./...` green (4 new — `LoadRequired` missing/present/path, the frozen-cache refusal and the fresh-cache fire), a dry run prints "Nothing due — skipping", and a missing config now exits 1 with the reason. Not verified: that the reminders fire on schedule (next `ig-liked` 2026-12-07, `pi-smoke` 2027-10-01).
 - 2026-10-25 — **scout's digest could never be delivered.** One forced run surfaced it in a
   minute: `telegram API error: Bad Request: message is too long`. `splitMessage` trusted each
